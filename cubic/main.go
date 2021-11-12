@@ -52,7 +52,8 @@ func main() {
 
 	err = groth16.Verify(proof, vk, publicWitness)
 	if err != nil {
+		fmt.Printf("verification failed\n")
 		return
 	}
-	fmt.Printf("Verify ok\n")
+	fmt.Printf("verification succeded\n")
 }
