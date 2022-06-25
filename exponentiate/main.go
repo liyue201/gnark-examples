@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/consensys/gnark-crypto/ecc"
-	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
 )
 
 // Circuit y == x**e
@@ -21,12 +21,12 @@ type Circuit struct {
 
 // Define declares the circuit's constraints
 // y == x**e
-func (circuit *Circuit) Define(curveID ecc.ID, api frontend.API) error {
+func (circuit *Circuit) Define(api frontend.API) error {
 	// number of bits of exponent
 	const bitSize = 8
 
 	// specify constraints
-	output := api.Constant(1)
+	output := frontend.Variable(1)
 	bits := api.ToBinary(circuit.E, bitSize)
 	multiply := circuit.X
 
@@ -41,10 +41,10 @@ func (circuit *Circuit) Define(curveID ecc.ID, api frontend.API) error {
 }
 
 func main() {
-	var expCircuit Circuit
-	r1cs, err := frontend.Compile(ecc.BN254, backend.GROTH16, &expCircuit)
+	curve := ecc.BN254
+	r1cs, err := frontend.Compile(curve, r1cs.NewBuilder, &Circuit{})
 	if err != nil {
-		fmt.Printf("Compile failed : %v\n", err)
+		fmt.Printf("Compile failed\n")
 		return
 	}
 
@@ -54,26 +54,27 @@ func main() {
 		return
 	}
 
-	witness := &Circuit{
-		X: frontend.Value(3),
-		Y: frontend.Value(59049),
-		E: frontend.Value(10),
-	}
-	proof, err := groth16.Prove(r1cs, pk, witness)
+	validWitness, err := frontend.NewWitness(&Circuit{
+		X: 3,
+		Y: 59049,
+		E: 10,
+	}, curve)
+
+	proof, err := groth16.Prove(r1cs, pk, validWitness)
 	if err != nil {
 		fmt.Printf("Prove failed： %v\n", err)
 		return
 	}
 
-	publicWitness := &Circuit{
-		X: frontend.Value(3),
-		Y: frontend.Value(59049),
-	}
+	validPublicWitness, err := frontend.NewWitness( &Circuit{
+		X: 3,
+		Y: 59049,
+	}, curve, frontend.PublicOnly())
 
-	err = groth16.Verify(proof, vk, publicWitness)
+	err = groth16.Verify(proof, vk, validPublicWitness)
 	if err != nil {
 		fmt.Printf("verification failed: %v\n", err)
 		return
 	}
-	fmt.Printf("verification succeded\n")
+	fmt.Printf("Verification successful\n")
 }

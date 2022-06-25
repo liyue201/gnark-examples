@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/consensys/gnark-crypto/ecc"
-	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
 )
 
 // Circuit defines a simple circuit
@@ -19,41 +19,45 @@ type Circuit struct {
 
 // Define declares the circuit constraints
 // x**3 + x + 5 == y
-func (circuit *Circuit) Define(curveID ecc.ID, api frontend.API) error {
+func (circuit *Circuit) Define(api frontend.API) error {
 	x3 := api.Mul(circuit.X, circuit.X, circuit.X)
 	api.AssertIsEqual(circuit.Y, api.Add(x3, circuit.X, 5))
 	return nil
 }
 
 func main() {
-	var cubicCircuit Circuit
-	r1cs, err := frontend.Compile(ecc.BN254, backend.GROTH16, &cubicCircuit)
+	curve := ecc.BN254
+	r1cs, err := frontend.Compile(curve, r1cs.NewBuilder, &Circuit{})
 	if err != nil {
+		fmt.Printf("Compile failed\n")
 		return
 	}
 
 	pk, vk, err := groth16.Setup(r1cs)
 	if err != nil {
+		fmt.Printf("Setup failed\n")
 		return
 	}
 
-	witness := &Circuit{
-		X: frontend.Value(3),
-		Y: frontend.Value(35),
-	}
-	proof, err := groth16.Prove(r1cs, pk, witness)
+	validWitness, err := frontend.NewWitness(&Circuit{
+		X: 3,
+		Y: 35,
+	}, curve)
+	proof, err := groth16.Prove(r1cs, pk, validWitness)
 	if err != nil {
+		fmt.Printf("Prove failed： %v\n", err)
 		return
 	}
 
-	publicWitness := &Circuit{
-		Y: frontend.Value(35),
-	}
+	validPublicWitness, err := frontend.NewWitness(&Circuit{
+		Y: 35,
+	}, curve, frontend.PublicOnly())
 
-	err = groth16.Verify(proof, vk, publicWitness)
+	err = groth16.Verify(proof, vk, validPublicWitness)
 	if err != nil {
 		fmt.Printf("verification failed\n")
 		return
 	}
-	fmt.Printf("verification succeded\n")
+
+	fmt.Printf("Verification successful\n")
 }

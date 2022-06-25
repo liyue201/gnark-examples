@@ -6,9 +6,9 @@ import (
 	"github.com/consensys/gnark-crypto/accumulator/merkletree"
 	"github.com/consensys/gnark-crypto/ecc"
 	bn254 "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
-	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/std/accumulator/merkle"
 	"github.com/consensys/gnark/std/hash/mimc"
 	"math/rand"
@@ -20,8 +20,8 @@ type merkleCircuit struct {
 	Path, Helper []frontend.Variable
 }
 
-func (circuit *merkleCircuit) Define(curveID ecc.ID, api frontend.API) error {
-	hFunc, err := mimc.NewMiMC("seed", curveID, api)
+func (circuit *merkleCircuit) Define(api frontend.API) error {
+	hFunc, err := mimc.NewMiMC(api)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func main() {
 	// build & verify proof for an elmt in the file
 	proofIndex := uint64(5)
 	segmentSize := 10
-	merkleRoot, merkleProof, numLeaves, err := merkletree.BuildReaderProof(&buf, bn254.NewMiMC("seed"), segmentSize, proofIndex)
+	merkleRoot, merkleProof, numLeaves, err := merkletree.BuildReaderProof(&buf, bn254.NewMiMC(), segmentSize, proofIndex)
 	if err != nil {
 		return
 	}
@@ -60,7 +60,7 @@ func main() {
 
 	fmt.Printf("proofHelper: %v\n", proofHelper)
 
-	verified := merkletree.VerifyProof(bn254.NewMiMC("seed"), merkleRoot, merkleProof, proofIndex, numLeaves)
+	verified := merkletree.VerifyProof(bn254.NewMiMC(), merkleRoot, merkleProof, proofIndex, numLeaves)
 	if !verified {
 		fmt.Printf("The merkle proof in plain go should pass")
 	}
@@ -70,9 +70,10 @@ func main() {
 		Path:   make([]frontend.Variable, len(merkleProof)),
 		Helper: make([]frontend.Variable, len(merkleProof)-1),
 	}
-	r1cs, err := frontend.Compile(ecc.BN254, backend.GROTH16, &circuit)
+	curve := ecc.BN254
+	r1cs, err := frontend.Compile(curve, r1cs.NewBuilder, &circuit)
 	if err != nil {
-		fmt.Printf("Compile failed : %v\n", err)
+		fmt.Printf("Compile failed\n")
 		return
 	}
 
@@ -82,31 +83,33 @@ func main() {
 		return
 	}
 
-	witness := &merkleCircuit{
+	witness := merkleCircuit{
 		Path:     make([]frontend.Variable, len(merkleProof)),
 		Helper:   make([]frontend.Variable, len(merkleProof)-1),
-		RootHash: frontend.Value(merkleRoot),
+		RootHash: merkleRoot,
 	}
 	for i := 0; i < len(merkleProof); i++ {
-		witness.Path[i].Assign(merkleProof[i])
+		witness.Path[i] = merkleProof[i]
 	}
 	for i := 0; i < len(merkleProof)-1; i++ {
-		witness.Helper[i].Assign(proofHelper[i])
+		witness.Helper[i] = proofHelper[i]
 	}
+	validWitness, err := frontend.NewWitness(&witness, curve)
 
-	proof, err := groth16.Prove(r1cs, pk, witness)
+	proof, err := groth16.Prove(r1cs, pk, validWitness)
 	if err != nil {
 		fmt.Printf("Prove failed： %v\n", err)
 		return
 	}
 
-	publicWitness := &merkleCircuit{
-		RootHash: frontend.Value(merkleRoot),
-	}
-	err = groth16.Verify(proof, vk, publicWitness)
+	validPublicWitness, err := frontend.NewWitness(&merkleCircuit{
+		RootHash: merkleRoot,
+	}, curve, frontend.PublicOnly())
+
+	err = groth16.Verify(proof, vk, validPublicWitness)
 	if err != nil {
 		fmt.Printf("verification failed: %v\n", err)
 		return
 	}
-	fmt.Printf("verification succeded\n")
+	fmt.Printf("Verification successful\n")
 }
